@@ -16,6 +16,19 @@ check_and_install_deps() {
     if ! command -v curl &> /dev/null; then
         missing_deps+=("curl")
     fi
+
+    # 检查 speedtest-cli
+    if ! command -v speedtest-cli &> /dev/null; then
+        echo "正在安装 speedtest-cli..."
+        if command -v apt &> /dev/null; then
+            apt update
+            apt install -y python3-pip
+            pip3 install speedtest-cli
+        elif command -v yum &> /dev/null; then
+            yum install -y python3-pip
+            pip3 install speedtest-cli
+        fi
+    fi
     
     # 如果有缺失的依赖，尝试安装
     if [ ${#missing_deps[@]} -ne 0 ]; then
@@ -35,52 +48,33 @@ check_and_install_deps() {
 # 执行依赖检查和安装
 check_and_install_deps
 
-# 定义测速函数
-do_speed_test() {
-    # 尝试使用 wget 测试下载速度
-    local test_file="http://cachefly.cachefly.net/10mb.test"
-    local temp_file="/tmp/speedtest.tmp"
-    echo "正在使用备用方法测试下载速度..."
-    
-    # 使用 wget 测试下载速度
-    local start_time=$(date +%s.%N)
-    wget -O "$temp_file" "$test_file" 2>&1 | grep -i "saved" > /dev/null
-    local status=$?
-    local end_time=$(date +%s.%N)
-    
-    if [ $status -eq 0 ]; then
-        local file_size=$(stat -c %s "$temp_file")
-        local time_diff=$(echo "$end_time - $start_time" | bc)
-        local speed_mbps=$(echo "scale=2; ($file_size * 8) / ($time_diff * 1000000)" | bc)
-        echo "$speed_mbps"
-        rm -f "$temp_file"
-    else
-        echo "测速失败"
-    fi
-}
-
 # 获取当前时间
 CURRENT_TIME=$(date "+%Y-%m-%d %H:%M:%S")
 
 # 运行 speedtest 并获取结果
 echo "开始测速..."
 
-# 尝试使用 speedtest-cli
-if command -v speedtest-cli &> /dev/null; then
-    SPEEDTEST_RESULT=$(speedtest-cli --simple 2>/dev/null)
+# 使用 speedtest-cli 测速
+SPEEDTEST_RESULT=$(speedtest-cli --simple 2>/dev/null)
+if [ $? -eq 0 ]; then
+    DOWNLOAD_SPEED=$(echo "$SPEEDTEST_RESULT" | grep "Download" | awk '{print $2}')
+    UPLOAD_SPEED=$(echo "$SPEEDTEST_RESULT" | grep "Upload" | awk '{print $2}')
+    PING=$(echo "$SPEEDTEST_RESULT" | grep "Ping" | awk '{print $2}')
+else
+    echo "Speedtest 失败，使用备用方法..."
+    # 使用 ping 测试延迟
+    PING_RESULT=$(ping -c 3 8.8.8.8 2>/dev/null)
     if [ $? -eq 0 ]; then
-        DOWNLOAD_SPEED=$(echo "$SPEEDTEST_RESULT" | grep "Download" | awk '{print $2}')
-        UPLOAD_SPEED=$(echo "$SPEEDTEST_RESULT" | grep "Upload" | awk '{print $2}')
-        PING=$(echo "$SPEEDTEST_RESULT" | grep "Ping" | awk '{print $2}')
+        PING=$(echo "$PING_RESULT" | tail -1 | awk -F '/' '{print $5}')
+    else
+        PING="N/A"
     fi
-fi
 
-# 如果 speedtest-cli 失败，使用备用方法
-if [ -z "$DOWNLOAD_SPEED" ] || [ -z "$UPLOAD_SPEED" ]; then
-    echo "使用备用测速方法..."
-    DOWNLOAD_SPEED=$(do_speed_test)
+    # 使用 curl 测试下载速度
+    TEST_FILE="http://speedtest.wdc01.softlayer.com/downloads/test10.zip"
+    SPEED_TEST=$(curl -s -w "%{speed_download}" -o /dev/null "$TEST_FILE")
+    DOWNLOAD_SPEED=$(echo "scale=2; $SPEED_TEST / 131072" | bc)
     UPLOAD_SPEED="N/A"
-    PING="N/A"
 fi
 
 # 获取服务器信息
