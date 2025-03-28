@@ -59,6 +59,9 @@ do_speed_test() {
     fi
 }
 
+# 获取当前时间
+CURRENT_TIME=$(date "+%Y-%m-%d %H:%M:%S")
+
 # 运行 speedtest 并获取结果
 echo "开始测速..."
 
@@ -68,6 +71,7 @@ if command -v speedtest-cli &> /dev/null; then
     if [ $? -eq 0 ]; then
         DOWNLOAD_SPEED=$(echo "$SPEEDTEST_RESULT" | grep "Download" | awk '{print $2}')
         UPLOAD_SPEED=$(echo "$SPEEDTEST_RESULT" | grep "Upload" | awk '{print $2}')
+        PING=$(echo "$SPEEDTEST_RESULT" | grep "Ping" | awk '{print $2}')
     fi
 fi
 
@@ -76,14 +80,20 @@ if [ -z "$DOWNLOAD_SPEED" ] || [ -z "$UPLOAD_SPEED" ]; then
     echo "使用备用测速方法..."
     DOWNLOAD_SPEED=$(do_speed_test)
     UPLOAD_SPEED="N/A"
+    PING="N/A"
 fi
 
-# 获取服务器 IP
+# 获取服务器信息
 SERVER_IP=$(curl -s ifconfig.me || curl -s icanhazip.com || curl -s ip.sb || echo "无法获取IP")
+HOSTNAME=$(hostname)
 
-# 构建简化的消息内容
-TITLE="${SERVER_IP} ↑${UPLOAD_SPEED}"
-CONTENT="↓${DOWNLOAD_SPEED}Mbps"
+# 构建消息内容
+TITLE="$SERVER_IP"
+CONTENT="测试时间: $CURRENT_TIME
+服务器: $HOSTNAME ($SERVER_IP)
+Ping: $PING ms
+下载速度: $DOWNLOAD_SPEED Mbit/s
+上传速度: $UPLOAD_SPEED Mbit/s"
 
 # 使用 pushplus 发送通知
 echo "发送测速结果到 pushplus..."
