@@ -1,0 +1,96 @@
+#!/bin/bash
+
+# 设置 pushplus token
+PUSH_PLUS_TOKEN="66481a4cd4e14b66bca5d38b7012d254"
+
+# 检查并安装必要的依赖
+check_and_install_deps() {
+    local missing_deps=()
+    
+    # 检查 bc 命令
+    if ! command -v bc &> /dev/null; then
+        missing_deps+=("bc")
+    fi
+    
+    # 检查 curl 命令
+    if ! command -v curl &> /dev/null; then
+        missing_deps+=("curl")
+    fi
+    
+    # 如果有缺失的依赖，尝试安装
+    if [ ${#missing_deps[@]} -ne 0 ]; then
+        echo "正在安装必要的依赖: ${missing_deps[*]}"
+        if command -v apt &> /dev/null; then
+            apt update
+            apt install -y "${missing_deps[@]}"
+        elif command -v yum &> /dev/null; then
+            yum install -y "${missing_deps[@]}"
+        else
+            echo "无法自动安装依赖，请手动安装: ${missing_deps[*]}"
+            exit 1
+        fi
+    fi
+}
+
+# 执行依赖检查和安装
+check_and_install_deps
+
+# 定义测速函数
+do_speed_test() {
+    # 尝试使用 wget 测试下载速度
+    local test_file="http://cachefly.cachefly.net/10mb.test"
+    local temp_file="/tmp/speedtest.tmp"
+    echo "正在使用备用方法测试下载速度..."
+    
+    # 使用 wget 测试下载速度
+    local start_time=$(date +%s.%N)
+    wget -O "$temp_file" "$test_file" 2>&1 | grep -i "saved" > /dev/null
+    local status=$?
+    local end_time=$(date +%s.%N)
+    
+    if [ $status -eq 0 ]; then
+        local file_size=$(stat -c %s "$temp_file")
+        local time_diff=$(echo "$end_time - $start_time" | bc)
+        local speed_mbps=$(echo "scale=2; ($file_size * 8) / ($time_diff * 1000000)" | bc)
+        echo "$speed_mbps"
+        rm -f "$temp_file"
+    else
+        echo "测速失败"
+    fi
+}
+
+# 运行 speedtest 并获取结果
+echo "开始测速..."
+
+# 尝试使用 speedtest-cli
+if command -v speedtest-cli &> /dev/null; then
+    SPEEDTEST_RESULT=$(speedtest-cli --simple 2>/dev/null)
+    if [ $? -eq 0 ]; then
+        DOWNLOAD_SPEED=$(echo "$SPEEDTEST_RESULT" | grep "Download" | awk '{print $2}')
+        UPLOAD_SPEED=$(echo "$SPEEDTEST_RESULT" | grep "Upload" | awk '{print $2}')
+    fi
+fi
+
+# 如果 speedtest-cli 失败，使用备用方法
+if [ -z "$DOWNLOAD_SPEED" ] || [ -z "$UPLOAD_SPEED" ]; then
+    echo "使用备用测速方法..."
+    DOWNLOAD_SPEED=$(do_speed_test)
+    UPLOAD_SPEED="N/A"
+fi
+
+# 获取服务器 IP
+SERVER_IP=$(curl -s ifconfig.me || curl -s icanhazip.com || curl -s ip.sb || echo "无法获取IP")
+
+# 构建简化的消息内容
+TITLE="${SERVER_IP} ↑${UPLOAD_SPEED}"
+CONTENT="↓${DOWNLOAD_SPEED}Mbps"
+
+# 使用 pushplus 发送通知
+echo "发送测速结果到 pushplus..."
+curl -s "http://www.pushplus.plus/send" \
+    -d "token=$PUSH_PLUS_TOKEN" \
+    -d "title=$TITLE" \
+    -d "content=$CONTENT" \
+    -d "template=txt"
+
+echo "测速完成并已推送结果" 
